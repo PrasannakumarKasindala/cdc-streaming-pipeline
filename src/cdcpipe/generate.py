@@ -101,19 +101,19 @@ def build_log(orders: int = 2000, updates: int = 4000, deletes: int = 300,
     return events
 
 
-def deliver(events: list[dict], disorder: int = 8, dup_rate: float = 0.02,
+def deliver(events: list[dict], disorder: int = 600, dup_rate: float = 0.02,
             seed: int = 5) -> list[dict]:
-    """Simulate Kafka delivery: shuffle within a window and re-deliver some."""
+    """Simulate Kafka delivery: bounded forward delay (broker/network lag) plus
+    re-delivery. Each event is pushed forward by a random amount in
+    [0, disorder]; when disorder exceeds the consumer's batch size, events arrive
+    late *across* micro-batches -- the case that breaks arrival-order merges."""
     rng = _lcg(seed)
-    out = list(events)
-    # windowed shuffle -> bounded out-of-order
-    if disorder > 1:
-        for i in range(0, len(out), disorder):
-            window = out[i:i + disorder]
-            for j in range(len(window) - 1, 0, -1):
-                k = next(rng) % (j + 1)
-                window[j], window[k] = window[k], window[j]
-            out[i:i + disorder] = window
+    tagged = []
+    for i, ev in enumerate(events):
+        delay = next(rng) % (disorder + 1)
+        tagged.append((i + delay, i, ev))       # (i, ...) keeps it a stable sort
+    tagged.sort(key=lambda t: (t[0], t[1]))
+    out = [t[2] for t in tagged]
     # duplicates -> at-least-once
     delivered = []
     dup_every = max(1, int(1 / dup_rate)) if dup_rate > 0 else 0

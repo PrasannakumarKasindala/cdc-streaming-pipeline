@@ -65,7 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--orders", type=int, default=2000)
     g.add_argument("--updates", type=int, default=4000)
     g.add_argument("--deletes", type=int, default=300)
-    g.add_argument("--disorder", type=int, default=8,
+    g.add_argument("--disorder", type=int, default=600,
                    help="out-of-order window size (Kafka reordering)")
     g.add_argument("--dup-rate", type=float, default=0.02,
                    help="fraction of events re-delivered (at-least-once)")
