@@ -80,10 +80,16 @@ class IcebergSink:
                 self.identifier, schema=_arrow_schema(spec))
 
     def apply_changes(self, upsert_rows: list[dict], delete_keys: list) -> None:
+        import warnings
+
         from pyiceberg.expressions import In
 
         if delete_keys:
-            self.table.delete(In(self.spec.key, list(delete_keys)))
+            # A delete for a key not present is a valid no-op (idempotency); the
+            # library warns on an empty match, which is just noise here.
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                self.table.delete(In(self.spec.key, list(delete_keys)))
         if upsert_rows:
             self.table.upsert(rows_to_arrow(upsert_rows, self.spec),
                               join_cols=[self.spec.key])
