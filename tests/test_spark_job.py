@@ -13,6 +13,19 @@ def test_merge_sql_has_lsn_guard():
     assert "WHEN NOT MATCHED AND s.op <> 'd' THEN INSERT" in sql
 
 
+def test_merge_enumerates_columns_not_wildcard():
+    # `batch` carries an extra `op` column; wildcard MERGE would misalign.
+    sql = spark_job.MERGE_SQL
+    assert "UPDATE SET *" not in sql and "INSERT *" not in sql
+    assert "t.amount      = s.amount" in sql
+    assert "VALUES (s.order_id" in sql
+
+
+def test_target_ddl_carries_lsn():
+    assert "_lsn" in spark_job.TARGET_DDL
+    assert "USING iceberg" in spark_job.TARGET_DDL
+
+
 def test_functions_exist():
     assert callable(spark_job.parse_debezium)
     assert callable(spark_job.dedup_to_latest)

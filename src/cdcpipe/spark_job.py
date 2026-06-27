@@ -28,14 +28,36 @@ Run (Spark 3.5+, Iceberg + Kafka packages):
 
 from __future__ import annotations
 
-# Target carries _lsn so ordering survives across micro-batches.
+# Target carries _lsn so ordering survives across micro-batches. Columns are
+# enumerated explicitly: the `batch` source view carries an extra `op` column
+# that the target does not, so `UPDATE SET *` / `INSERT *` would misalign.
 MERGE_SQL = """
 MERGE INTO {table} t
 USING batch s
 ON t.order_id = s.order_id
 WHEN MATCHED AND s.op = 'd' AND s._lsn > t._lsn THEN DELETE
-WHEN MATCHED AND s.op <> 'd' AND s._lsn > t._lsn THEN UPDATE SET *
-WHEN NOT MATCHED AND s.op <> 'd' THEN INSERT *
+WHEN MATCHED AND s.op <> 'd' AND s._lsn > t._lsn THEN UPDATE SET
+  t.customer_id = s.customer_id,
+  t.status      = s.status,
+  t.amount      = s.amount,
+  t.updated_ms  = s.updated_ms,
+  t._lsn        = s._lsn
+WHEN NOT MATCHED AND s.op <> 'd' THEN INSERT
+  (order_id, customer_id, status, amount, updated_ms, _lsn)
+  VALUES (s.order_id, s.customer_id, s.status, s.amount, s.updated_ms, s._lsn)
+"""
+
+# Iceberg target DDL. The _lsn column is operational (drives the MERGE guard);
+# downstream consumers ignore it.
+TARGET_DDL = """
+CREATE TABLE IF NOT EXISTS {table} (
+  order_id    BIGINT,
+  customer_id BIGINT,
+  status      STRING,
+  amount      DECIMAL(18,2),
+  updated_ms  BIGINT,
+  _lsn        BIGINT
+) USING iceberg
 """
 
 DEBEZIUM_SCHEMA = (
@@ -81,7 +103,6 @@ def dedup_to_latest(df):
 def make_foreach_batch(table: str):
     def upsert(batch_df, _epoch_id):
         latest = dedup_to_latest(batch_df)
-        latest.sparkSession.catalog.dropTempView("batch")
         latest.createOrReplaceTempView("batch")
         latest.sparkSession.sql(MERGE_SQL.format(table=table))
     return upsert
@@ -105,6 +126,8 @@ def main(argv=None):  # pragma: no cover - requires a Spark cluster
                      "org.apache.iceberg.spark.extensions."
                      "IcebergSparkSessionExtensions")
              .getOrCreate())
+
+    spark.sql(TARGET_DDL.format(table=args.table))
 
     kafka_df = (spark.readStream.format("kafka")
                 .option("kafka.bootstrap.servers", args.bootstrap)
