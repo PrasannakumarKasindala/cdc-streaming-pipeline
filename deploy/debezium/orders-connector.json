@@ -1,0 +1,20 @@
+{
+  "name": "orders-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "tasks.max": "1",
+    "database.hostname": "postgres",
+    "database.port": "5432",
+    "database.user": "postgres",
+    "database.password": "postgres",
+    "database.dbname": "retail",
+    "topic.prefix": "dbserver",
+    "table.include.list": "public.orders",
+    "plugin.name": "pgoutput",
+    "slot.name": "orders_slot",
+    "publication.autocreate.mode": "filtered",
+    "decimal.handling.mode": "string",
+    "snapshot.mode": "initial",
+    "tombstones.on.delete": "false"
+  }
+}
