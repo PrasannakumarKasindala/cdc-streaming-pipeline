@@ -1,0 +1,64 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check src tests
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e ".[dev]"
+      - run: pytest --cov=cdcpipe --cov-report=term-missing --cov-fail-under=85
+
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - name: exactly-once merge reconciles to parity (exit 0)
+        run: |
+          set -euo pipefail
+          cdcpipe generate /tmp/cdc --orders 500 --updates 1000 --deletes 80
+          cdcpipe run --stream /tmp/cdc/stream.jsonl --warehouse /tmp/ok
+          cdcpipe reconcile --stream /tmp/cdc/stream.jsonl --warehouse /tmp/ok
+      - name: naive arrival merge drifts and is caught (exit 1)
+        run: |
+          set -uo pipefail
+          cdcpipe run --stream /tmp/cdc/stream.jsonl --warehouse /tmp/bad --mode arrival
+          if cdcpipe reconcile --stream /tmp/cdc/stream.jsonl --warehouse /tmp/bad; then
+            echo "::error::reconciler failed to catch known drift"; exit 1
+          fi
+          echo "drift correctly detected (non-zero exit)"
+
+  terraform:
+    runs-on: ubuntu-latest
+    continue-on-error: true   # informational; does not gate merges
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform -chdir=deploy/terraform fmt -check -recursive
+      - run: terraform -chdir=deploy/terraform init -backend=false
+      - run: terraform -chdir=deploy/terraform validate
